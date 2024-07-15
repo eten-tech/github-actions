@@ -1,0 +1,46 @@
+name: 'Delete Hotfix/Patch Branch'
+description: 'Deletes a hotfix or patch branch when it is no longer needed'
+
+inputs:
+  current_branch:
+    description: 'Name of the current branch'
+    required: true
+  app_id:
+    description: 'GitHub App ID'
+    required: true
+  private_key:
+    description: 'GitHub App private key'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Github Token
+      uses: tibdex/github-app-token@v1
+      id: generate_token
+      with:
+        app_id: ${{ inputs.app_id }}
+        private_key: ${{ inputs.private_key }}
+
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ steps.generate_token.outputs.token }}
+        fetch-depth: 0
+
+    - name: Check if branch is hotfix or patch
+      id: check_branch
+      shell: bash
+      run: |
+        if [[ "${{ inputs.current_branch }}" =~ ^(release-hotfix-|release-patch-) ]]; then
+          echo "is_hotfix_or_patch=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_hotfix_or_patch=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Delete branch
+      if: steps.check_branch.outputs.is_hotfix_or_patch == 'true'
+      shell: bash
+      run: |
+        git push origin --delete ${{ inputs.current_branch }}
+      env:
+        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
