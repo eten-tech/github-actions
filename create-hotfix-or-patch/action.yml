@@ -1,0 +1,105 @@
+name: 'Create Hotfix/Patch'
+description: 'Create a hotfix/patch'
+inputs:
+  environment:
+    description: 'Current deployment to apply the commit to.'
+    required: true
+  commit_id:
+    description: "Commit SHA from master"
+    required: true
+  app_id:
+    description: 'GitHub App ID'
+    required: true
+  private_key:
+    description: 'GitHub App private key'
+    required: true
+  github_token:
+    description: 'GitHub token'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Github Token
+      uses: tibdex/github-app-token@v1
+      id: generate_token
+      with:
+        app_id: ${{ inputs.app_id }}
+        private_key: ${{ inputs.private_key }}
+
+    - uses: actions/checkout@v3
+      with:
+        token: ${{ steps.generate_token.outputs.token }}
+        fetch-depth: 1
+
+    - name: Check for existing branch
+      id: check_branch
+      shell: bash
+      run: |
+        branch_prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "release-patch" || echo "release-hotfix")
+        existing_branch=$(git ls-remote --heads origin ${branch_prefix}-* | head -n 1 | cut -f2 | sed 's/^refs\/heads\///')
+        echo "existing_branch=${existing_branch}" >> $GITHUB_OUTPUT
+
+    - name: Find currently deployed commit
+      if: steps.check_branch.outputs.existing_branch == ''
+      id: find_commit
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const script = require('./find-deployed-commit.js')
+          return await script({ github, context, core }, '${{ inputs.environment }}')
+
+    - name: Create new branch
+      if: steps.check_branch.outputs.existing_branch == ''
+      id: create_new_branch
+      shell: bash
+      run: |
+        branch_prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "release-patch" || echo "release-hotfix")
+        new_branch="${branch_prefix}-$(date +'%Y-%m-%d')"
+        git fetch origin ${{ steps.find_commit.outputs.result }}
+        git checkout -b $new_branch ${{ steps.find_commit.outputs.result }}
+        git push origin $new_branch
+        echo "new_branch=${new_branch}" >> $GITHUB_OUTPUT
+
+    - name: Cherry-pick commit
+      id: cherry_pick
+      shell: bash
+      run: |
+        source_branch=$([ -n "${{ steps.check_branch.outputs.existing_branch }}" ] && echo "${{ steps.check_branch.outputs.existing_branch }}" || echo "${{ steps.create_new_branch.outputs.new_branch }}")
+        git fetch origin ${{ inputs.commit_id }}
+        git fetch origin $source_branch
+        git checkout $source_branch
+        commit_title=$(git log --format=%s -n 1 ${{ inputs.commit_id }} | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+        cherry_pick_branch=$([ "${{ inputs.environment }}" == "QA" ] && echo "patch" || echo "hotfix")-${commit_title}
+        git checkout -b $cherry_pick_branch
+        git config --global user.email "biblionexusbot[bot]@users.noreply.github.com"
+        git config --global user.name "biblionexusbot[bot]"
+        if git cherry-pick -m 1 --edit ${{ inputs.commit_id }}; then
+          cherry_pick_status="successful"
+        else
+          git add .
+          git cherry-pick --continue
+          cherry_pick_status="failed"
+        fi
+        commit_msg=$(git log --format=%B -n 1 HEAD)
+        prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "Patch Commit: " || echo "Hotfix Commit: ")
+        git commit --amend -m "${prefix}${commit_msg}"
+        git push -f origin $cherry_pick_branch
+        echo "cherry_pick_status=${cherry_pick_status}" >> $GITHUB_OUTPUT
+        echo "cherry_pick_branch=${cherry_pick_branch}" >> $GITHUB_OUTPUT
+        echo "source_branch=${source_branch}" >> $GITHUB_OUTPUT
+
+    - name: Create Pull Request
+      shell: bash
+      run: |
+        gh pr create \
+          --base ${{ steps.cherry_pick.outputs.source_branch }} \
+          --title "${{ inputs.environment == 'QA' && 'Patch' || 'Hotfix' }} PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
+          --body "This PR contains a ${{ inputs.environment == 'QA' && 'patch' || 'hotfix' }} cherry-picked from master.
+
+        ${{ steps.cherry_pick.outputs.cherry_pick_status == 'failed' && ':warning: Merge conflicts happened that require manual intervention.' || ':white_check_mark: No merge conflicts.' }}" \
+          --head ${{ steps.cherry_pick.outputs.cherry_pick_branch }}
+      env:
+        GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
+
