@@ -5,7 +5,7 @@ inputs:
     description: 'Current deployment to apply the commit to.'
     required: true
   commit_id:
-    description: "Commit SHA from master"
+    description: "Commit SHA from main/master"
     required: true
   app_id:
     description: 'GitHub App ID'
@@ -30,7 +30,15 @@ runs:
     - uses: actions/checkout@v3
       with:
         token: ${{ steps.generate_token.outputs.token }}
-        fetch-depth: 1
+        fetch-depth: 0
+
+    - name: Check if commit is in main/master history
+      shell: bash
+      run: |
+        if ! git merge-base --is-ancestor ${{ inputs.commit_id }} origin/main && ! git merge-base --is-ancestor ${{ inputs.commit_id }} origin/master; then
+          echo "Error: The provided commit is not on main/master branch. Get the commit merged into main/master first then run this again."
+          exit 1
+        fi
 
     - name: Check for existing branch
       id: check_branch
@@ -75,7 +83,7 @@ runs:
         git checkout -b $cherry_pick_branch
         git config --global user.email "biblionexusbot[bot]@users.noreply.github.com"
         git config --global user.name "biblionexusbot[bot]"
-        if git cherry-pick -m 1 --edit ${{ inputs.commit_id }}; then
+        if git cherry-pick ${{ inputs.commit_id }}; then
           cherry_pick_status="successful"
         else
           git add .
@@ -96,7 +104,7 @@ runs:
         gh pr create \
           --base ${{ steps.cherry_pick.outputs.source_branch }} \
           --title "${{ inputs.environment == 'QA' && 'Patch' || 'Hotfix' }} PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
-          --body "This PR contains a ${{ inputs.environment == 'QA' && 'patch' || 'hotfix' }} cherry-picked from master.
+          --body "This PR contains a ${{ inputs.environment == 'QA' && 'patch' || 'hotfix' }} cherry-picked from main/master.
 
         ${{ steps.cherry_pick.outputs.cherry_pick_status == 'failed' && ':warning: Merge conflicts happened that require manual intervention.' || ':white_check_mark: No merge conflicts.' }}" \
           --head ${{ steps.cherry_pick.outputs.cherry_pick_branch }}

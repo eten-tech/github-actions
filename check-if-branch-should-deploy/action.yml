@@ -1,0 +1,38 @@
+name: 'Check If Branch Should Deploy'
+description: "Checks if the branch is master/main or if it's a hotfix/patch being applied."
+inputs:
+  current_branch:
+    description: 'Current branch.'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - id: check
+      shell: bash
+      run: |
+        if [[ "${{ inputs.current_branch }}" == "main" ]] || [[ "${{ inputs.current_branch }}" == "master" ]]; then
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+        elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+          fi
+        elif git rev-parse --verify origin/master >/dev/null 2>&1; then
+          if ! git merge-base --is-ancestor HEAD origin/master; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+        fi
+
+outputs:
+  should_deploy:
+    description: 'Whether the branch should be deployed'
+    value: ${{ steps.check.outputs.should_deploy }}
