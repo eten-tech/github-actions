@@ -44,7 +44,7 @@ runs:
       id: check_branch
       shell: bash
       run: |
-        branch_prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "release-patch" || echo "release-hotfix")
+        branch_prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "release-patch" || echo "release-hotfix")
         existing_branch=$(git ls-remote --heads origin ${branch_prefix}-* | head -n 1 | cut -f2 | sed 's/^refs\/heads\///')
         echo "existing_branch=${existing_branch}" >> $GITHUB_OUTPUT
 
@@ -95,7 +95,7 @@ runs:
       id: create_new_branch
       shell: bash
       run: |
-        branch_prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "release-patch" || echo "release-hotfix")
+        branch_prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "release-patch" || echo "release-hotfix")
         new_branch="${branch_prefix}-$(date +'%Y-%m-%d')"
         git fetch origin ${{ steps.find_commit.outputs.result }}
         git checkout -b $new_branch ${{ steps.find_commit.outputs.result }}
@@ -111,7 +111,7 @@ runs:
         git fetch origin $source_branch
         git checkout $source_branch
         commit_title=$(git log --format=%s -n 1 ${{ inputs.commit_id }} | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
-        cherry_pick_branch=$([ "${{ inputs.environment }}" == "QA" ] && echo "patch" || echo "hotfix")-${commit_title}
+        cherry_pick_branch=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "patch" || echo "hotfix")-${commit_title}
         git checkout -b $cherry_pick_branch
         git config --global user.email "biblionexusbot[bot]@users.noreply.github.com"
         git config --global user.name "biblionexusbot[bot]"
@@ -123,7 +123,7 @@ runs:
           cherry_pick_status="failed"
         fi
         commit_msg=$(git log --format=%B -n 1 HEAD)
-        prefix=$([ "${{ inputs.environment }}" == "QA" ] && echo "Patch Commit: " || echo "Hotfix Commit: ")
+        prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "Patch Commit: " || echo "Hotfix Commit: ")
         git commit --amend -m "${prefix}${commit_msg}"
         git push -f origin $cherry_pick_branch
         echo "cherry_pick_status=${cherry_pick_status}" >> $GITHUB_OUTPUT
@@ -135,11 +135,10 @@ runs:
       run: |
         gh pr create \
           --base ${{ steps.cherry_pick.outputs.source_branch }} \
-          --title "${{ inputs.environment == 'QA' && 'Patch' || 'Hotfix' }} PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
-          --body "This PR contains a ${{ inputs.environment == 'QA' && 'patch' || 'hotfix' }} cherry-picked from main/master.
+          --title "$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "Patch" || echo "Hotfix") PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
+          --body "This PR contains a $(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "patch" || echo "hotfix") cherry-picked from main/master.
 
         ${{ steps.cherry_pick.outputs.cherry_pick_status == 'failed' && ':warning: Merge conflicts happened that require manual intervention.' || ':white_check_mark: No merge conflicts.' }}" \
           --head ${{ steps.cherry_pick.outputs.cherry_pick_branch }}
       env:
         GITHUB_TOKEN: ${{ steps.generate_token.outputs.token }}
-
