@@ -1,5 +1,9 @@
-name: 'Delete Hotfix/Patch Branch'
-description: 'Deletes a hotfix or patch branch when it is no longer needed'
+# This action is designed to be run after a production deployment to clean up temporary hotfix branches.
+# It automatically detects if the current branch is a hotfix branch (prefixed with 'release-hotfix-')
+# and deletes it from the repository.
+
+name: 'Delete Hotfix Branch'
+description: 'Deletes a hotfix branch when it is no longer needed'
 
 inputs:
   current_branch:
@@ -27,18 +31,18 @@ runs:
         token: ${{ steps.generate_token.outputs.token }}
         fetch-depth: 0
 
-    - name: Check if branch is hotfix or patch
+    - name: Check if branch is hotfix
       id: check_branch
       shell: bash
       run: |
-        if [[ "${{ inputs.current_branch }}" =~ ^(release-hotfix-|release-patch-) ]]; then
-          echo "is_hotfix_or_patch=true" >> $GITHUB_OUTPUT
+        if [[ "${{ inputs.current_branch }}" =~ ^release-hotfix- ]]; then
+          echo "is_hotfix=true" >> $GITHUB_OUTPUT
         else
-          echo "is_hotfix_or_patch=false" >> $GITHUB_OUTPUT
+          echo "is_hotfix=false" >> $GITHUB_OUTPUT
         fi
 
     - name: Delete branch
-      if: steps.check_branch.outputs.is_hotfix_or_patch == 'true'
+      if: steps.check_branch.outputs.is_hotfix == 'true'
       shell: bash
       run: |
         git push origin --delete ${{ inputs.current_branch }}

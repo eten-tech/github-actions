@@ -1,5 +1,14 @@
+# This action checks if a branch should be deployed by verifying if it's main/master
+# or if it's a divergent branch (like a hotfix) that's ahead of main/master.
+#
+# This is useful to avoid cluttering GitHub deployment lists with the initial branch
+# created during the hotfix process. i.e. it's unnecessary to have a deployment created
+# when creating a new branch that points to the same commit as master.
+#
+# Sets a `should_deploy` output to `true` or `false`
+
 name: 'Check If Branch Should Deploy'
-description: "Checks if the branch is master/main or if it's a hotfix/patch being applied."
+description: "Checks if the branch is master/main or if it's a hotfix being applied."
 inputs:
   current_branch:
     description: 'Current branch.'
