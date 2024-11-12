@@ -1,8 +1,15 @@
-name: 'Create Hotfix/Patch'
-description: 'Create a hotfix/patch'
+# Create a new hotfix branch from the most recently deployed commit to production and cherry-pick a specified commit.
+# This action automates the process of:
+# 1. Creating a hotfix branch from the last successful production deployment
+# 2. Cherry-picking a specified commit from main/master
+# 3. Creating a pull request for review
+# The action also detects merge conflicts and provides appropriate status messages.
+
+name: 'Create Hotfix'
+description: 'Create a hotfix'
 inputs:
-  environment:
-    description: 'Current deployment to apply the commit to.'
+  prod_environment:
+    description: 'Prod environment to apply the commit to.'
     required: true
   commit_id:
     description: "Commit SHA from main/master"
@@ -44,8 +51,7 @@ runs:
       id: check_branch
       shell: bash
       run: |
-        branch_prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "release-patch" || echo "release-hotfix")
-        existing_branch=$(git ls-remote --heads origin ${branch_prefix}-* | head -n 1 | cut -f2 | sed 's/^refs\/heads\///')
+        existing_branch=$(git ls-remote --heads origin release-hotfix-* | head -n 1 | cut -f2 | sed 's/^refs\/heads\///')
         echo "existing_branch=${existing_branch}" >> $GITHUB_OUTPUT
 
     - name: Find currently deployed commit
@@ -55,7 +61,7 @@ runs:
       with:
         github-token: ${{ inputs.github_token }}
         script: |
-          const environment = '${{ inputs.environment }}';
+          const environment = '${{ inputs.prod_environment }}';
           try {
               const { data: deployments } = await github.rest.repos.listDeployments({
                   owner: context.repo.owner,
@@ -80,9 +86,11 @@ runs:
               }
 
               if (successfulDeployments.length > 0) {
-                  return successfulDeployments.sort(
+                  const foundSha = successfulDeployments.sort(
                       (a, b) => new Date(b.created_at) - new Date(a.created_at),
                   )[0]?.sha || null;
+                  console.log('Found successful deployment: ' + foundSha);
+                  return foundSha;
               }
 
               core.setFailed(`Couldn't find an active deployment for ${environment}`);
@@ -95,8 +103,7 @@ runs:
       id: create_new_branch
       shell: bash
       run: |
-        branch_prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "release-patch" || echo "release-hotfix")
-        new_branch="${branch_prefix}-$(date +'%Y-%m-%d')"
+        new_branch="release-hotfix-$(date +'%Y-%m-%d')"
         git fetch origin ${{ steps.find_commit.outputs.result }}
         git checkout -b $new_branch ${{ steps.find_commit.outputs.result }}
         git push origin $new_branch
@@ -111,8 +118,8 @@ runs:
         git fetch origin $source_branch
         git checkout $source_branch
         commit_title=$(git log --format=%s -n 1 ${{ inputs.commit_id }} | tr '[:upper:]' '[:lower:]' | sed 's/[^a-zA-Z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
-        cherry_pick_branch=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "patch" || echo "hotfix")-${commit_title}
-        git checkout -b $cherry_pick_branch
+        cherry_pick_branch="hotfix-${commit_title}"
+        git checkout -b "$cherry_pick_branch"
         git config --global user.email "biblionexusbot[bot]@users.noreply.github.com"
         git config --global user.name "biblionexusbot[bot]"
         if git cherry-pick ${{ inputs.commit_id }}; then
@@ -123,9 +130,8 @@ runs:
           cherry_pick_status="failed"
         fi
         commit_msg=$(git log --format=%B -n 1 HEAD)
-        prefix=$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "Patch Commit: " || echo "Hotfix Commit: ")
-        git commit --amend -m "${prefix}${commit_msg}"
-        git push -f origin $cherry_pick_branch
+        git commit --amend -m "Hotfix Commit: ${commit_msg}"
+        git push origin $cherry_pick_branch
         echo "cherry_pick_status=${cherry_pick_status}" >> $GITHUB_OUTPUT
         echo "cherry_pick_branch=${cherry_pick_branch}" >> $GITHUB_OUTPUT
         echo "source_branch=${source_branch}" >> $GITHUB_OUTPUT
@@ -135,8 +141,8 @@ runs:
       run: |
         gh pr create \
           --base ${{ steps.cherry_pick.outputs.source_branch }} \
-          --title "$(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "Patch" || echo "Hotfix") PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
-          --body "This PR contains a $(echo "${{ inputs.environment }}" | tr '[:upper:]' '[:lower:]' | grep -q "qa" && echo "patch" || echo "hotfix") cherry-picked from main/master.
+          --title "Hotfix PR: $(git log --format=%s -n 1 ${{ inputs.commit_id }})" \
+          --body "This PR contains a hotfix cherry-picked from main/master.
 
         ${{ steps.cherry_pick.outputs.cherry_pick_status == 'failed' && ':warning: Merge conflicts happened that require manual intervention.' || ':white_check_mark: No merge conflicts.' }}" \
           --head ${{ steps.cherry_pick.outputs.cherry_pick_branch }}
