@@ -28,13 +28,13 @@ runs:
   using: "composite"
   steps:
     - name: Generate Github Token
-      uses: tibdex/github-app-token@v1
+      uses: tibdex/github-app-token@v2
       id: generate_token
       with:
         app_id: ${{ inputs.app_id }}
         private_key: ${{ inputs.private_key }}
 
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         token: ${{ steps.generate_token.outputs.token }}
         fetch-depth: 0
@@ -57,7 +57,7 @@ runs:
     - name: Find currently deployed commit
       if: steps.check_branch.outputs.existing_branch == ''
       id: find_commit
-      uses: actions/github-script@v6
+      uses: actions/github-script@v7
       with:
         github-token: ${{ inputs.github_token }}
         script: |
